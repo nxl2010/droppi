@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs/promises';
-import { authenticate } from '@google-cloud/local-auth';
 import { google } from 'googleapis';
 
 const app = express();
@@ -17,45 +16,50 @@ app.use(express.json());
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 /**
- * Tự động tạo tệp physical credentials.json và token.json trên Server Cloud nếu có biến môi trường
+ * Khởi tạo tệp credentials.json và token.json nếu truyền qua Biến Môi Trường (Railway Variables)
  */
 async function initEnvFiles() {
   if (process.env.CREDENTIALS_JSON) {
     try {
       await fs.writeFile(CREDENTIALS_PATH, process.env.CREDENTIALS_JSON, 'utf-8');
-      console.log('✅ Đã khởi tạo tệp credentials.json từ CREDENTIALS_JSON Environment Variable!');
-    } catch (e) {
-      console.error('Lỗi khởi tạo credentials.json:', e.message);
-    }
+    } catch (e) {}
   }
   if (process.env.TOKEN_JSON) {
     try {
       await fs.writeFile(TOKEN_PATH, process.env.TOKEN_JSON, 'utf-8');
-      console.log('✅ Đã khởi tạo tệp token.json từ TOKEN_JSON Environment Variable!');
-    } catch (e) {
-      console.error('Lỗi khởi tạo token.json:', e.message);
-    }
+    } catch (e) {}
   }
 }
 
 /**
- * Đọc Credentials
+ * Lấy Cấu hình Credentials
  */
 async function getCredentialsConfig() {
   await initEnvFiles();
+  if (process.env.CREDENTIALS_JSON) {
+    try {
+      return JSON.parse(process.env.CREDENTIALS_JSON);
+    } catch (e) {}
+  }
   try {
     const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
     return JSON.parse(content);
   } catch (err) {
-    throw new Error('Chưa tìm thấy tệp credentials.json hoặc biến CREDENTIALS_JSON trên Railway!');
+    throw new Error('Thiếu cấu hình CREDENTIALS_JSON trên Server. Hãy thêm biến CREDENTIALS_JSON vào Railway Variables!');
   }
 }
 
 /**
- * Đọc Token
+ * Đọc Token xác thực
  */
 async function loadSavedCredentialsIfExist() {
   await initEnvFiles();
+  if (process.env.TOKEN_JSON) {
+    try {
+      const credentials = JSON.parse(process.env.TOKEN_JSON);
+      return google.auth.fromJSON(credentials);
+    } catch (e) {}
+  }
   try {
     const content = await fs.readFile(TOKEN_PATH, 'utf-8');
     const credentials = JSON.parse(content);
@@ -66,41 +70,52 @@ async function loadSavedCredentialsIfExist() {
 }
 
 /**
- * Lưu token để tái sử dụng
- */
-async function saveCredentials(client) {
-  try {
-    const keys = await getCredentialsConfig();
-    const key = keys.installed || keys.web;
-    const payload = JSON.stringify({
-      type: 'authorized_user',
-      client_id: key.client_id,
-      client_secret: key.client_secret,
-      refresh_token: client.credentials.refresh_token,
-    });
-    await fs.writeFile(TOKEN_PATH, payload);
-  } catch (err) {}
-}
-
-/**
- * Ủy quyền OAuth2
+ * Ủy quyền Gmail API Serverless (Không dùng browser popup, hỗ trợ 100% Cloud Server / Railway)
  */
 async function authorize() {
+  // 1. Thử nạp OAuth Client từ token đã lưu
   let client = await loadSavedCredentialsIfExist();
   if (client) {
     return client;
   }
-  
-  await getCredentialsConfig();
-  
-  client = await authenticate({
-    scopes: SCOPES,
-    keyfilePath: CREDENTIALS_PATH,
-  });
-  if (client && client.credentials) {
-    await saveCredentials(client);
+
+  // 2. Dựng OAuth2 client từ Credentials + Refresh Token
+  const keys = await getCredentialsConfig();
+  const key = keys.installed || keys.web;
+
+  if (!key || !key.client_id || !key.client_secret) {
+    throw new Error('Credentials không hợp lệ (thiếu client_id hoặc client_secret).');
   }
-  return client;
+
+  // Nạp token
+  let tokenData = null;
+  if (process.env.TOKEN_JSON) {
+    try { tokenData = JSON.parse(process.env.TOKEN_JSON); } catch (e) {}
+  }
+  if (!tokenData) {
+    try {
+      const content = await fs.readFile(TOKEN_PATH, 'utf-8');
+      tokenData = JSON.parse(content);
+    } catch (e) {}
+  }
+
+  if (!tokenData) {
+    throw new Error('Chưa cấu hình TOKEN_JSON trên Railway. Vui lòng thêm biến TOKEN_JSON trong Railway Variables!');
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    key.client_id,
+    key.client_secret,
+    key.redirect_uris ? key.redirect_uris[0] : 'http://localhost'
+  );
+
+  oauth2Client.setCredentials({
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token || tokenData.token,
+    expiry_date: tokenData.expiry_date
+  });
+
+  return oauth2Client;
 }
 
 /**
@@ -123,7 +138,7 @@ function getPlainText(part) {
 }
 
 /**
- * Thuật toán Regex bóc tách OTP thông minh (Trích xuất chính xác 908108 cho Droppii OTP)
+ * Thuật toán Regex bóc tách OTP thông minh
  */
 function extractOTP(text = '', subject = '', customRegex = '') {
   const combinedText = `${subject}\n${text}`;
