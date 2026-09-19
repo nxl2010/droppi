@@ -17,36 +17,45 @@ app.use(express.json());
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 /**
- * Đọc Credentials từ File hoặc Biến Môi Trường (CREDENTIALS_JSON)
+ * Tự động tạo tệp physical credentials.json và token.json trên Server Cloud nếu có biến môi trường
  */
-async function getCredentialsConfig() {
+async function initEnvFiles() {
   if (process.env.CREDENTIALS_JSON) {
     try {
-      return JSON.parse(process.env.CREDENTIALS_JSON);
+      await fs.writeFile(CREDENTIALS_PATH, process.env.CREDENTIALS_JSON, 'utf-8');
+      console.log('✅ Đã khởi tạo tệp credentials.json từ CREDENTIALS_JSON Environment Variable!');
     } catch (e) {
-      console.error('Lỗi parse CREDENTIALS_JSON từ Environment Variable');
+      console.error('Lỗi khởi tạo credentials.json:', e.message);
     }
   }
-  try {
-    const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
-    return JSON.parse(content);
-  } catch (err) {
-    throw new Error('Chưa cấu hình CREDENTIALS_JSON trên Server. Vui lòng thêm biến CREDENTIALS_JSON vào Railway Variables!');
+  if (process.env.TOKEN_JSON) {
+    try {
+      await fs.writeFile(TOKEN_PATH, process.env.TOKEN_JSON, 'utf-8');
+      console.log('✅ Đã khởi tạo tệp token.json từ TOKEN_JSON Environment Variable!');
+    } catch (e) {
+      console.error('Lỗi khởi tạo token.json:', e.message);
+    }
   }
 }
 
 /**
- * Đọc Token từ File hoặc Biến Môi Trường (TOKEN_JSON)
+ * Đọc Credentials
+ */
+async function getCredentialsConfig() {
+  await initEnvFiles();
+  try {
+    const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
+    return JSON.parse(content);
+  } catch (err) {
+    throw new Error('Chưa tìm thấy tệp credentials.json hoặc biến CREDENTIALS_JSON trên Railway!');
+  }
+}
+
+/**
+ * Đọc Token
  */
 async function loadSavedCredentialsIfExist() {
-  if (process.env.TOKEN_JSON) {
-    try {
-      const credentials = JSON.parse(process.env.TOKEN_JSON);
-      return google.auth.fromJSON(credentials);
-    } catch (e) {
-      console.error('Lỗi parse TOKEN_JSON từ Environment Variable');
-    }
-  }
+  await initEnvFiles();
   try {
     const content = await fs.readFile(TOKEN_PATH, 'utf-8');
     const credentials = JSON.parse(content);
@@ -81,6 +90,9 @@ async function authorize() {
   if (client) {
     return client;
   }
+  
+  await getCredentialsConfig();
+  
   client = await authenticate({
     scopes: SCOPES,
     keyfilePath: CREDENTIALS_PATH,
@@ -111,12 +123,11 @@ function getPlainText(part) {
 }
 
 /**
- * Thuật toán Regex bóc tách OTP thông minh (Xử lý chính xác các trường hợp như Droppii OTP: 908108)
+ * Thuật toán Regex bóc tách OTP thông minh (Trích xuất chính xác 908108 cho Droppii OTP)
  */
 function extractOTP(text = '', subject = '', customRegex = '') {
   const combinedText = `${subject}\n${text}`;
 
-  // 1. Regex tùy chỉnh nếu người dùng chỉ định
   if (customRegex && customRegex.trim()) {
     try {
       const reg = new RegExp(customRegex.trim(), 'i');
@@ -128,12 +139,10 @@ function extractOTP(text = '', subject = '', customRegex = '') {
     } catch (e) {}
   }
 
-  // 2. Mẫu nhận diện chính xác từ khóa OTP đứng trước số
-  // Xử lý tốt các mẫu như: "One Time Password (OTP): 908108" hoặc "Mã OTP là 123456"
   const specificOTPRegexes = [
     /(?:OTP|passcode|code|PIN|mã\s*xác\s*minh|mã\s*xác\s*thực)\s*[\):]*\s*[:=\s\-]*\s*([0-9]{4,8})\b/i,
-    /\b(\d{6})\b/,           // Chuỗi 6 chữ số (ví dụ 908108)
-    /\b(\d{4,8})\b/,          // Chuỗi 4-8 chữ số
+    /\b(\d{6})\b/,
+    /\b(\d{4,8})\b/,
     /\b([A-Z0-9]{6})\b/i
   ];
 
@@ -141,13 +150,11 @@ function extractOTP(text = '', subject = '', customRegex = '') {
     const match = combinedText.match(reg);
     if (match && match[1]) {
       const extracted = match[1].trim();
-      // Loại trừ các con số năm (2024, 2025, 2026)
       if (/^(202[0-9])$/.test(extracted)) continue;
       return { code: extracted, reason: `Matched pattern: ${reg.toString()}` };
     }
   }
 
-  // 3. Fallback
   const fallbackMatch = combinedText.match(/\b\d{4,8}\b/);
   if (fallbackMatch) {
     return { code: fallbackMatch[0], reason: 'Fallback number' };
@@ -229,12 +236,13 @@ app.post('/api/get-otp', async (req, res) => {
     console.error('API Error:', error.message);
     return res.status(500).json({
       success: false,
-      message: error.message || 'Lỗi xử lý Gmail API. Hãy kiểm tra biến CREDENTIALS_JSON và TOKEN_JSON trên Railway!'
+      message: error.message || 'Lỗi xử lý Gmail API'
     });
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  await initEnvFiles();
   console.log(`================================================`);
   console.log(`⚡ Gmail OTP Reader 1-Click Web App đang chạy tại:`);
   console.log(`👉 Port: ${PORT}`);
