@@ -17,7 +17,7 @@ app.use(express.json());
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 /**
- * Đọc Credentials từ File hoặc Biến Môi Trường (Railway / Server Environment)
+ * Đọc Credentials từ File hoặc Biến Môi Trường (CREDENTIALS_JSON)
  */
 async function getCredentialsConfig() {
   if (process.env.CREDENTIALS_JSON) {
@@ -27,8 +27,12 @@ async function getCredentialsConfig() {
       console.error('Lỗi parse CREDENTIALS_JSON từ Environment Variable');
     }
   }
-  const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
-  return JSON.parse(content);
+  try {
+    const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
+    return JSON.parse(content);
+  } catch (err) {
+    throw new Error('Chưa cấu hình CREDENTIALS_JSON trên Server. Vui lòng thêm biến CREDENTIALS_JSON vào Railway Variables!');
+  }
 }
 
 /**
@@ -107,11 +111,12 @@ function getPlainText(part) {
 }
 
 /**
- * Regex bóc tách OTP
+ * Thuật toán Regex bóc tách OTP thông minh (Xử lý chính xác các trường hợp như Droppii OTP: 908108)
  */
 function extractOTP(text = '', subject = '', customRegex = '') {
   const combinedText = `${subject}\n${text}`;
 
+  // 1. Regex tùy chỉnh nếu người dùng chỉ định
   if (customRegex && customRegex.trim()) {
     try {
       const reg = new RegExp(customRegex.trim(), 'i');
@@ -123,23 +128,26 @@ function extractOTP(text = '', subject = '', customRegex = '') {
     } catch (e) {}
   }
 
-  const keywordRegexes = [
-    /(?:mã\s*(?:xác\s*minh|xác\s*thực|kích\s*hoạt|OTP)|verification\s*code|security\s*code|passcode|your\s*code|pin\s*code)\s*[:=\s\-]*\s*([A-Z0-9]{4,8})\b/i,
-    /(?:code|OTP|PIN)\s*[:=\s\-]+\s*([A-Z0-9]{4,8})\b/i,
-    /\b(\d{6})\b/,
-    /\b(\d{4,8})\b/,
+  // 2. Mẫu nhận diện chính xác từ khóa OTP đứng trước số
+  // Xử lý tốt các mẫu như: "One Time Password (OTP): 908108" hoặc "Mã OTP là 123456"
+  const specificOTPRegexes = [
+    /(?:OTP|passcode|code|PIN|mã\s*xác\s*minh|mã\s*xác\s*thực)\s*[\):]*\s*[:=\s\-]*\s*([0-9]{4,8})\b/i,
+    /\b(\d{6})\b/,           // Chuỗi 6 chữ số (ví dụ 908108)
+    /\b(\d{4,8})\b/,          // Chuỗi 4-8 chữ số
     /\b([A-Z0-9]{6})\b/i
   ];
 
-  for (const reg of keywordRegexes) {
+  for (const reg of specificOTPRegexes) {
     const match = combinedText.match(reg);
     if (match && match[1]) {
       const extracted = match[1].trim();
+      // Loại trừ các con số năm (2024, 2025, 2026)
       if (/^(202[0-9])$/.test(extracted)) continue;
-      return { code: extracted, reason: `Pattern ${reg.toString()}` };
+      return { code: extracted, reason: `Matched pattern: ${reg.toString()}` };
     }
   }
 
+  // 3. Fallback
   const fallbackMatch = combinedText.match(/\b\d{4,8}\b/);
   if (fallbackMatch) {
     return { code: fallbackMatch[0], reason: 'Fallback number' };
@@ -218,10 +226,10 @@ app.post('/api/get-otp', async (req, res) => {
       ...foundOTP
     });
   } catch (error) {
-    console.error('API Error:', error);
+    console.error('API Error:', error.message);
     return res.status(500).json({
       success: false,
-      message: error.message || 'Lỗi xử lý Gmail API'
+      message: error.message || 'Lỗi xử lý Gmail API. Hãy kiểm tra biến CREDENTIALS_JSON và TOKEN_JSON trên Railway!'
     });
   }
 });

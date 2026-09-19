@@ -7,9 +7,6 @@ const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
 const TOKEN_PATH = path.join(process.cwd(), 'token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
 
-/**
- * Đọc token đã lưu từ token.json nếu có (để không phải bật lại trình duyệt)
- */
 async function loadSavedCredentialsIfExist() {
   try {
     const content = await fs.readFile(TOKEN_PATH, 'utf-8');
@@ -20,9 +17,6 @@ async function loadSavedCredentialsIfExist() {
   }
 }
 
-/**
- * Lưu token để tự động sử dụng cho các lần sau
- */
 async function saveCredentials(client) {
   try {
     const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
@@ -38,9 +32,6 @@ async function saveCredentials(client) {
   } catch (err) {}
 }
 
-/**
- * Xác thực Google OAuth2
- */
 async function authorize() {
   let client = await loadSavedCredentialsIfExist();
   if (client) {
@@ -57,42 +48,35 @@ async function authorize() {
 }
 
 /**
- * Thuật toán Regex bóc tách mã OTP từ nội dung thư
+ * Thuật toán Regex bóc tách OTP thông minh (Xử lý chính xác các trường hợp như Droppii OTP: 908108)
  */
 function extractOTP(text = '', subject = '') {
   const combinedText = `${subject}\n${text}`;
 
-  // 1. Tìm theo cụm từ khóa tiếng Việt & tiếng Anh phổ biến
-  const keywordRegexes = [
-    /(?:mã\s*(?:xác\s*minh|xác\s*thực|kích\s*hoạt|OTP)|verification\s*code|security\s*code|passcode|your\s*code|pin\s*code)\s*[:=\s\-]*\s*([A-Z0-9]{4,8})\b/i,
-    /(?:code|OTP|PIN)\s*[:=\s\-]+\s*([A-Z0-9]{4,8})\b/i,
-    /\b(\d{6})\b/,           // 6 chữ số chuẩn (90% các dịch vụ sử dụng)
-    /\b(\d{4,8})\b/,          // 4 đến 8 chữ số
-    /\b([A-Z0-9]{6})\b/i      // 6 ký tự Alphanumeric
+  const specificOTPRegexes = [
+    /(?:OTP|passcode|code|PIN|mã\s*xác\s*minh|mã\s*xác\s*thực)\s*[\):]*\s*[:=\s\-]*\s*([0-9]{4,8})\b/i,
+    /\b(\d{6})\b/,           // 6 chữ số (ví dụ 908108)
+    /\b(\d{4,8})\b/,          // 4-8 chữ số
+    /\b([A-Z0-9]{6})\b/i
   ];
 
-  for (const reg of keywordRegexes) {
+  for (const reg of specificOTPRegexes) {
     const match = combinedText.match(reg);
     if (match && match[1]) {
       const extracted = match[1].trim();
-      // Loại trừ các con số năm (2024, 2025, 2026)
       if (/^(202[0-9])$/.test(extracted)) continue;
       return { code: extracted, reason: `Matched pattern: ${reg.toString()}` };
     }
   }
 
-  // 2. Fallback: Lấy chuỗi số 4-8 chữ số xuất hiện đầu tiên
   const fallbackMatch = combinedText.match(/\b\d{4,8}\b/);
   if (fallbackMatch) {
     return { code: fallbackMatch[0], reason: 'Fallback number pattern' };
   }
 
-  return { code: null, reason: 'Không tìm thấy mã OTP trong nội dung thư' };
+  return { code: null, reason: 'No OTP code' };
 }
 
-/**
- * Giải mã nội dung Body (base64url)
- */
 function getPlainText(part) {
   if (!part) return '';
   if (part.mimeType === 'text/plain' && part.body?.data) {
@@ -100,7 +84,7 @@ function getPlainText(part) {
   }
   if (part.mimeType === 'text/html' && part.body?.data) {
     const html = Buffer.from(part.body.data, 'base64url').toString('utf8');
-    return html.replace(/<[^>]*>/g, ' '); // Xóa các thẻ HTML
+    return html.replace(/<[^>]*>/g, ' ');
   }
   for (const child of part?.parts ?? []) {
     const text = getPlainText(child);
@@ -109,14 +93,11 @@ function getPlainText(part) {
   return '';
 }
 
-// === THỰC THI CHÍNH ===
 async function main() {
   console.log('🚀 Đang kết nối Gmail API...');
   const auth = await authorize();
   const gmail = google.gmail({ version: 'v1', auth });
 
-  // Bạn có thể tùy chỉnh query 'q' ở đây nếu muốn lọc theo dịch vụ cụ thể
-  // Ví dụ: q: 'from:facebook' hoặc q: 'subject:OTP'
   const query = 'in:inbox';
 
   console.log(`🔎 Đang tìm kiếm thư mới nhất trong Inbox (Query: "${query}")...`);
@@ -131,7 +112,6 @@ async function main() {
     return;
   }
 
-  // Quét qua các thư gần nhất để tìm thư có mã OTP
   let foundOTP = null;
 
   for (const item of data.messages) {
@@ -160,7 +140,7 @@ async function main() {
         date,
         snippet: mail.snippet
       };
-      break; // Lấy được OTP từ email gần nhất là dừng
+      break;
     }
   }
 
