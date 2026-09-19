@@ -17,9 +17,32 @@ app.use(express.json());
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 /**
- * Đọc token đã lưu
+ * Đọc Credentials từ File hoặc Biến Môi Trường (Railway / Server Environment)
+ */
+async function getCredentialsConfig() {
+  if (process.env.CREDENTIALS_JSON) {
+    try {
+      return JSON.parse(process.env.CREDENTIALS_JSON);
+    } catch (e) {
+      console.error('Lỗi parse CREDENTIALS_JSON từ Environment Variable');
+    }
+  }
+  const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
+  return JSON.parse(content);
+}
+
+/**
+ * Đọc Token từ File hoặc Biến Môi Trường (TOKEN_JSON)
  */
 async function loadSavedCredentialsIfExist() {
+  if (process.env.TOKEN_JSON) {
+    try {
+      const credentials = JSON.parse(process.env.TOKEN_JSON);
+      return google.auth.fromJSON(credentials);
+    } catch (e) {
+      console.error('Lỗi parse TOKEN_JSON từ Environment Variable');
+    }
+  }
   try {
     const content = await fs.readFile(TOKEN_PATH, 'utf-8');
     const credentials = JSON.parse(content);
@@ -34,8 +57,7 @@ async function loadSavedCredentialsIfExist() {
  */
 async function saveCredentials(client) {
   try {
-    const content = await fs.readFile(CREDENTIALS_PATH, 'utf-8');
-    const keys = JSON.parse(content);
+    const keys = await getCredentialsConfig();
     const key = keys.installed || keys.web;
     const payload = JSON.stringify({
       type: 'authorized_user',
@@ -207,6 +229,6 @@ app.post('/api/get-otp', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`================================================`);
   console.log(`⚡ Gmail OTP Reader 1-Click Web App đang chạy tại:`);
-  console.log(`👉 http://localhost:${PORT}`);
+  console.log(`👉 Port: ${PORT}`);
   console.log(`================================================`);
 });
