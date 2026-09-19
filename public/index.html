@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gmail OTP Reader - 1 Nút Bấm Lấy Mã</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-background"></div>
+
+  <div class="app-layout">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <div class="logo-icon">⚡</div>
+        <div>
+          <h1>Gmail OTP Reader</h1>
+          <p>Tự động đọc Gmail & lấy mã OTP tức thì</p>
+        </div>
+      </div>
+      <button id="btn-toggle-filter" class="btn btn-secondary">
+        <span>⚙️</span> Bộ Lọc Email
+      </button>
+    </header>
+
+    <!-- Optional Collapsible Filter Panel -->
+    <div id="filter-panel" class="filter-panel hidden">
+      <div class="filter-grid">
+        <div class="form-group">
+          <label for="filter-sender">Người gửi (From:)</label>
+          <input type="text" id="filter-sender" placeholder="Ví dụ: noreply@github.com hoặc facebook">
+        </div>
+        <div class="form-group">
+          <label for="filter-subject">Từ khóa Tiêu đề (Subject:)</label>
+          <input type="text" id="filter-subject" placeholder="Ví dụ: Mã xác minh, OTP, Code">
+        </div>
+        <div class="form-group">
+          <label for="filter-regex">Regex tùy chỉnh (Tùy chọn)</label>
+          <input type="text" id="filter-regex" placeholder="Biểu thức Regex (ví dụ: \b\d{6}\b)">
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN 1-BUTTON HERO AREA -->
+    <main class="main-content">
+      <div class="hero-button-wrapper">
+        <button id="btn-get-otp" class="hero-btn">
+          <div class="btn-glow"></div>
+          <div class="btn-icon">⚡</div>
+          <div class="btn-title">LẤY MÃ OTP NGAY</div>
+          <div class="btn-subtitle">Ấn <span>SPACE</span> hoặc <span>ENTER</span> để lấy nhanh</div>
+        </button>
+        <div id="loader" class="loader-box hidden">
+          <div class="spinner"></div>
+          <span>Đang truy vấn Gmail API & trích xuất mã OTP...</span>
+        </div>
+      </div>
+
+      <!-- GIANT OTP DISPLAY CARD -->
+      <div class="otp-card" id="otp-card">
+        <div class="otp-card-top">
+          <span class="status-badge" id="status-badge">Sẵn sàng</span>
+          <span class="time-badge" id="time-badge">Chưa có dữ liệu</span>
+        </div>
+
+        <div class="otp-display-box">
+          <div class="otp-number" id="otp-display">------</div>
+          <button id="btn-copy" class="btn btn-copy" disabled>
+            <span>📋</span> <span id="copy-text">Sao Chép Mã</span>
+          </button>
+        </div>
+
+        <div class="otp-details hidden" id="otp-details">
+          <div class="detail-row">
+            <span class="detail-label">Người gửi:</span>
+            <span class="detail-value" id="detail-from">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Tiêu đề:</span>
+            <span class="detail-value" id="detail-subject">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Xem trước:</span>
+            <span class="detail-value" id="detail-snippet">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- HISTORY LOG TABLE -->
+      <div class="history-card">
+        <div class="history-header">
+          <h3>📜 Lịch Sử Mã OTP</h3>
+          <button id="btn-clear-logs" class="btn btn-text">Xóa lịch sử</button>
+        </div>
+        <div class="history-list">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Mã OTP</th>
+                <th>Thời gian</th>
+                <th>Người gửi</th>
+                <th>Tiêu đề email</th>
+                <th>Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="history-body">
+              <tr class="empty-row">
+                <td colspan="5">Chưa có mã OTP nào. Bấm <b>"⚡ LẤY MÃ OTP NGAY"</b> để bắt đầu.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
